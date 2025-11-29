@@ -15,3 +15,4 @@ rich
 pillow
 supabase
 python-multipart
+ultralytics
