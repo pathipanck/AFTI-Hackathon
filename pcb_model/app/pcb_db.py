@@ -5,7 +5,7 @@ import uuid
 from dotenv import load_dotenv
 from supabase import create_client, Client
 
-from pcb_model.pcb_model import run_pcb_detection  # import จากไฟล์แรก
+from pcb_model import run_pcb_detection  # import จากไฟล์แรก
 
 load_dotenv()
 
@@ -98,67 +98,57 @@ def insert_defect_crop(
     res = supabase.table("pcb_defect_crops").insert(data).execute()
     return res.data[0]
 
-
-# ---------- Orchestrator: ใช้ model + เก็บ DB ----------
-
-def save_detection_to_supabase(
+def save_detection_to_supabase_and_get_urls(
     image_path: str,
-    model_path: str = "best.pt",
+    model_path: str,
     board_code: str | None = None,
     note: str | None = None,
 ):
     """
-    1) เรียก model จาก pcb_model.run_pcb_detection
-    2) อัพโหลดรูป detect หลัก
-    3) อัพโหลด crop ทุกรูป
-    4) Insert DB ทั้ง pcb_main_images และ pcb_defect_crops
+    รัน YOLO, upload รูปหลัก + crop ไป Supabase, insert DB
+    แล้วคืน payload ที่มี URL + metadata กลับมา
     """
-
-    # 1) รัน model (ไม่ยุ่งกับ Supabase)
-    detection_result = run_pcb_detection(image_path=image_path, model_path=model_path)
+    detection_result = run_pcb_detection(
+        image_path=image_path,
+        model_path=model_path,
+    )
 
     annotated = detection_result["annotated_image"]
-    main_bytes = annotated["bytes"]
-    main_width = annotated["width"]
-    main_height = annotated["height"]
-    original_filename = annotated["original_filename"]
 
-    # 2) upload main image
+    # 1) upload main image
     main_storage_path, main_public_url = upload_to_storage(
-        main_bytes,
+        annotated["bytes"],
         folder="pcb/main",
         ext="png",
     )
 
-    # 3) insert main image row
+    # 2) insert main image row
     main_image_id = insert_main_image(
         storage_path=main_storage_path,
         public_url=main_public_url,
-        width=main_width,
-        height=main_height,
-        original_filename=original_filename,
+        width=annotated["width"],
+        height=annotated["height"],
+        original_filename=annotated["original_filename"],
         board_code=board_code,
         note=note,
     )
 
-    print("✅ Main image uploaded & inserted:")
-    print("   id:", main_image_id)
-    print("   url:", main_public_url)
+    main_payload = {
+        "id": main_image_id,
+        "storage_path": main_storage_path,
+        "public_url": main_public_url,
+        "width": annotated["width"],
+        "height": annotated["height"],
+        "original_filename": annotated["original_filename"],
+        "board_code": board_code,
+        "note": note,
+    }
 
-    # 4) loop crops → upload + insert defect row
-    crops = detection_result["crops"]
-    print(f"\n==== Saving {len(crops)} defect crops to Supabase ====")
-
-    for idx, crop in enumerate(crops, start=1):
-        crop_bytes = crop["bytes"]
-        crop_width = crop["width"]
-        crop_height = crop["height"]
-        prediction = crop["prediction"]
-        confidence = crop["confidence"]
-        bbox = crop["bbox"]
-
+    # 3) upload crops + insert defects + สร้าง payload
+    crops_payload = []
+    for crop in detection_result["crops"]:
         crop_storage_path, crop_public_url = upload_to_storage(
-            crop_bytes,
+            crop["bytes"],
             folder="pcb/crops",
             ext="png",
         )
@@ -167,27 +157,27 @@ def save_detection_to_supabase(
             main_image_id=main_image_id,
             crop_storage_path=crop_storage_path,
             crop_public_url=crop_public_url,
-            crop_width=crop_width,
-            crop_height=crop_height,
-            prediction=prediction,
-            confidence=confidence,
-            bbox=bbox,
+            crop_width=crop["width"],
+            crop_height=crop["height"],
+            prediction=crop["prediction"],
+            confidence=crop["confidence"],
+            bbox=crop["bbox"],
         )
 
-        print(
-            f"  → Defect #{idx} row id: {defect_row['id']}, "
-            f"class={prediction}, conf={confidence:.4f}"
+        crops_payload.append(
+            {
+                "id": defect_row["id"],
+                "crop_storage_path": crop_storage_path,
+                "crop_public_url": crop_public_url,
+                "width": crop["width"],
+                "height": crop["height"],
+                "prediction": crop["prediction"],
+                "confidence": crop["confidence"],
+                "bbox": crop["bbox"],
+            }
         )
-        print("    crop url:", crop_public_url)
 
-    print("\n🎉 Done: YOLO results have been uploaded & saved to DB.")
-
-
-if __name__ == "__main__":
-    # ใช้งานจริงจากไฟล์นี้ตัวเดียวก็ได้
-    save_detection_to_supabase(
-        image_path="test1.png",     # เปลี่ยนให้ตรงกับไฟล์จริง
-        model_path="best.pt",       # โมเดลของเพื่อน
-        board_code="BOARD-0001",
-        note="Test upload from split files",
-    )
+    return {
+        "main_image": main_payload,
+        "crops": crops_payload,
+    }
