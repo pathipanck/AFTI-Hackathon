@@ -5,7 +5,7 @@ import uuid
 from dotenv import load_dotenv
 from supabase import create_client, Client
 
-from pcb_model import run_pcb_detection  # import จากไฟล์แรก
+from pcb_model.pcb_model import run_pcb_detection  # import จากไฟล์แรก
 
 load_dotenv()
 
