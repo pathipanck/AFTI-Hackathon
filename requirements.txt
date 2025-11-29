@@ -1,0 +1,17 @@
+fastapi
+uvicorn
+deepagents
+tavily-python
+langchain-google-genai
+langchain-groq
+langgraph-cli[inmem]
+langchain_tavily
+pydantic
+ipykernel
+python-dotenv
+markdownify
+httpx
+rich
+pillow
+supabase
+python-multipart
