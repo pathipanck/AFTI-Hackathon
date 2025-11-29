@@ -6,7 +6,7 @@ from io import BytesIO
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import JSONResponse
 
-from pcb_db import save_detection_to_supabase_and_get_urls
+from pcb_db import save_detection_to_supabase_and_get_urls, get_all_detections
 
 # หา path ของ best.pt แบบไม่ต้องเดา working dir
 BASE_DIR = os.path.dirname(__file__)          # โฟลเดอร์ app/
@@ -69,3 +69,16 @@ async def detect_pcb_image(
                 os.remove(tmp_path)
             except Exception:
                 pass
+
+@app.get("/detections")
+def list_detections():
+    """
+    ดึงข้อมูล detection ทั้งหมดจาก DB
+    - ไม่ส่งข้อมูล crop image
+    - มี main image + defects (prediction, confidence, bbox, timestamp)
+    """
+    try:
+        items = get_all_detections()
+        return {"items": items}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"db error: {e}")

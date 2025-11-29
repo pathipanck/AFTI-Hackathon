@@ -7,6 +7,8 @@ from supabase import create_client, Client
 
 from pcb_model import run_pcb_detection  # import จากไฟล์แรก
 
+from typing import List, Dict, Any
+
 load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -181,3 +183,58 @@ def save_detection_to_supabase_and_get_urls(
         "main_image": main_payload,
         "crops": crops_payload,
     }
+
+def get_all_detections() -> List[Dict[str, Any]]:
+    # ดึงรูปหลักทั้งหมด
+    main_res = supabase.table("pcb_main_images").select("*").execute()
+    main_rows = main_res.data or []
+
+    # ดึง defects ทั้งหมด
+    crop_res = supabase.table("pcb_defect_crops").select("*").execute()
+    crop_rows = crop_res.data or []
+
+    # group crop ตาม main_image_id
+    crops_by_main: Dict[str, List[Dict[str, Any]]] = {}
+    for c in crop_rows:
+        mid = c.get("main_image_id")
+        if mid is None:
+            continue
+        crops_by_main.setdefault(mid, []).append(c)
+
+    results: List[Dict[str, Any]] = []
+
+    for m in main_rows:
+        mid = m["id"]
+        main_item: Dict[str, Any] = {
+            "main_image_id": mid,
+            "main_image_url": m.get("public_url"),
+            "storage_path": m.get("storage_path"),
+            "original_filename": m.get("original_filename"),
+            "board_code": m.get("board_code"),
+            "note": m.get("note"),
+            # ถ้า table มีคอลัมน์ created_at (ตาม pattern ของ Supabase) ก็จะติดมาด้วย
+            "timestamp": m.get("created_at"),
+            "defects": [],
+        }
+
+        defects = []
+        for c in crops_by_main.get(mid, []):
+            defects.append(
+                {
+                    "id": c.get("id"),
+                    "prediction": c.get("prediction"),
+                    "confidence": c.get("confidence"),
+                    "bbox": {
+                        "x": c.get("bbox_x"),
+                        "y": c.get("bbox_y"),
+                        "w": c.get("bbox_width"),
+                        "h": c.get("bbox_height"),
+                    },
+                    "timestamp": c.get("created_at"),
+                }
+            )
+
+        main_item["defects"] = defects
+        results.append(main_item)
+
+    return results
